@@ -129,6 +129,1013 @@
             <span id="speedLabel">Delay: 0.5s</span>
         </div>
     </div>
-    <script src="game.js"></script>
+    <script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Game constants
+const GRID_SIZE = 4;
+const CELL_SIZE = 128;
+const ANIMATION_DURATION = 200; // Animation duration in milliseconds
+const NEW_BOX_SCALE = 0.1; // Starting scale for new boxes
+
+// Add color mapping at the top with other constants
+const BOX_COLORS = {
+    2: '#eee4da',
+    4: '#ede0c8',
+    8: '#f2b179',
+    16: '#f59563',
+    32: '#f67c5f',
+    64: '#f65e3b',
+    128: '#edcf72',
+    256: '#edcc61',
+    512: '#edc850',
+    1024: '#edc53f',
+    2048: '#edc22e'
+};
+
+const TEXT_COLORS = {
+    2: '#776e65',
+    4: '#776e65',
+    8: '#f9f6f2',
+    16: '#f9f6f2',
+    32: '#f9f6f2',
+    64: '#f9f6f2',
+    128: '#f9f6f2',
+    256: '#f9f6f2',
+    512: '#f9f6f2',
+    1024: '#f9f6f2',
+    2048: '#f9f6f2'
+};
+
+// Add to the top with other constants
+const GAME_OVER_OVERLAY_COLOR = 'rgba(238, 228, 218, 0.73)';
+const GAME_OVER_TEXT_COLOR = '#776e65';
+
+// Add to the top with other constants
+let AUTOPLAY_DELAY = 500; // Default 0.5 seconds
+let isAutoPlaying = false;
+
+// Add to the top with other constants
+const ARROW_COLOR = 'rgba(143, 122, 102, 0.8)'; // Match button color
+const ARROW_DISPLAY_TIME = 300; // Show arrow for 300ms
+let currentArrow = null; // {direction, timestamp}
+
+// Add to the top with other constants
+let stepCount = 0;
+const STEP_COUNTER_FONT = '24px Arial';
+const STEP_COUNTER_COLOR = '#776e65';
+const STEP_COUNTER_PADDING = 20;
+
+// Add to the top with other state variables
+let positionsEvaluated = 0;
+let totalPositionsEvaluated = 0;  // Accumulated total
+let currentMovePositionsEvaluated = 0;  // For the current move
+
+// Add at the top with other constants
+const PROBE_DEPTH = 5;
+const MIN_SCORE = -Infinity;
+const MAX_SCORE = Infinity;
+
+// Set canvas size
+canvas.width = GRID_SIZE * CELL_SIZE;   // 512px
+canvas.height = GRID_SIZE * CELL_SIZE;  // 512px
+
+// Array to store all boxes
+let boxes = [];
+
+// Add to the top with other state variables and constants
+let isCalculating = false;
+
+// Initialize first box
+function addNewBox() {
+    const emptyPositions = [];
+    
+    // Find all empty positions
+    for (let y = 0; y < GRID_SIZE; y++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+            if (!boxes.some(box => box.gridX === x && box.gridY === y)) {
+                emptyPositions.push({x, y});
+            }
+        }
+    }
+    
+    if (emptyPositions.length > 0) {
+        const randomPos = emptyPositions[Math.floor(Math.random() * emptyPositions.length)];
+        boxes.push({
+            gridX: randomPos.x,
+            gridY: randomPos.y,
+            value: Math.random() < 0.9 ? 2 : 4,
+            isNew: true,
+            scale: NEW_BOX_SCALE,
+            animationStart: Date.now()
+        });
+    }
+}
+
+// Add initial box
+addNewBox();
+
+// Draw the grid
+function drawGrid() {
+    // Clear canvas with white background
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw cells
+    for (let row = 0; row < GRID_SIZE; row++) {
+        for (let col = 0; col < GRID_SIZE; col++) {
+            // Calculate position
+            const x = col * CELL_SIZE;
+            const y = row * CELL_SIZE;
+            
+            // Draw cell border
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
+        }
+    }
+}
+
+// Draw all boxes
+function drawBox() {
+    boxes.forEach(box => {
+        const x = box.gridX * CELL_SIZE;
+        const y = box.gridY * CELL_SIZE;
+        
+        // Calculate scale for new boxes
+        let scale = 1;
+        if (box.isNew) {
+            const elapsed = Date.now() - box.animationStart;
+            if (elapsed < ANIMATION_DURATION) {
+                scale = NEW_BOX_SCALE + (1 - NEW_BOX_SCALE) * (elapsed / ANIMATION_DURATION);
+                requestAnimationFrame(render);
+            } else {
+                box.isNew = false;
+            }
+        }
+        
+        ctx.save();
+        ctx.translate(
+            x + CELL_SIZE/2,
+            y + CELL_SIZE/2
+        );
+        ctx.scale(scale, scale);
+        
+        // Draw the box background with value-based color
+        ctx.fillStyle = BOX_COLORS[box.value] || '#ff0000'; // Red for undefined values
+        ctx.fillRect(
+            -CELL_SIZE/2 + 5,
+            -CELL_SIZE/2 + 5,
+            CELL_SIZE - 10,
+            CELL_SIZE - 10
+        );
+        
+        // Draw the number with value-based text color
+        ctx.fillStyle = TEXT_COLORS[box.value] || '#ffffff';
+        // Adjust font size based on number length
+        const fontSize = box.value >= 1000 ? 35 : 48;
+        ctx.font = `bold ${fontSize}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(
+            box.value.toString(),
+            0,
+            0
+        );
+        
+        ctx.restore();
+    });
+}
+
+// Helper function to sort boxes for correct movement order
+function sortBoxesForMovement(direction, boxesState = boxes) {
+    return boxesState.sort((a, b) => {
+        switch (direction) {
+            case 'right':
+                return b.gridX - a.gridX;
+            case 'left':
+                return a.gridX - b.gridX;
+            case 'down':
+                return b.gridY - a.gridY;
+            case 'up':
+                return a.gridY - b.gridY;
+        }
+    });
+}
+
+// Check if position has a mergeable box
+function getMergeableBox(x, y, value, currentBox) {
+    return boxes.find(box => 
+        box !== currentBox && 
+        box.gridX === x && 
+        box.gridY === y && 
+        box.value === value
+    );
+}
+
+// Helper function to get target position based on direction
+function getTargetPosition(direction, currentX, currentY) {
+    switch (direction) {
+        case 'right':
+            return { x: GRID_SIZE - 1, y: currentY };
+        case 'left':
+            return { x: 0, y: currentY };
+        case 'down':
+            return { x: currentX, y: GRID_SIZE - 1 };
+        case 'up':
+            return { x: currentX, y: 0 };
+    }
+}
+
+// Add move testing function
+function canMoveInDirection(direction, boxesState = boxes) {
+    // Clone boxes if we're testing a hypothetical move
+    const testBoxes = JSON.parse(JSON.stringify(boxesState));
+    
+    // Sort boxes for correct movement order
+    const sortedBoxes = sortBoxesForMovement(direction, testBoxes);
+    
+    // Try to move each box and check if any would move or merge
+    let wouldMove = false;
+    const mergedPositions = new Set(); // Track positions where merges occurred
+    
+    for (const box of sortedBoxes) {
+        let newX = box.gridX;
+        let newY = box.gridY;
+        let moved = false;
+
+        while (true) {
+            let nextX = newX;
+            let nextY = newY;
+
+            switch (direction) {
+                case 'right':
+                    nextX++;
+                    break;
+                case 'left':
+                    nextX--;
+                    break;
+                case 'down':
+                    nextY++;
+                    break;
+                case 'up':
+                    nextY--;
+                    break;
+            }
+
+            // Check boundaries
+            if (nextX < 0 || nextX >= GRID_SIZE || nextY < 0 || nextY >= GRID_SIZE) {
+                break;
+            }
+
+            // Find box at next position
+            const nextBox = testBoxes.find(b => b.gridX === nextX && b.gridY === nextY);
+            
+            if (!nextBox) {
+                // Empty space - can move
+                newX = nextX;
+                newY = nextY;
+                moved = true;
+            } else if (box.value === nextBox.value && 
+                      !mergedPositions.has(`${nextX},${nextY}`)) {
+                // Can merge
+                mergedPositions.add(`${nextX},${nextY}`);
+                moved = true;
+                break;
+            } else {
+                // Blocked
+                break;
+            }
+        }
+
+        if (moved) {
+            wouldMove = true;
+        }
+    }
+
+    return wouldMove;
+}
+
+// Update isGameOver function
+function isGameOver() {
+    // Check if any move is possible in any direction
+    return !['up', 'right', 'down', 'left'].some(direction => 
+        canMoveInDirection(direction)
+    );
+}
+
+// Move boxes function
+function moveBoxes(direction) {
+    if (!canMoveInDirection(direction)) {
+        return; // Don't attempt invalid moves
+    }
+
+    let moved = false;
+    
+    // First pass: move all boxes as far as possible
+    const sortedBoxes = sortBoxesForMovement(direction);
+    sortedBoxes.forEach(box => {
+        let newX = box.gridX;
+        let newY = box.gridY;
+
+        while (true) {
+            let nextX = newX;
+            let nextY = newY;
+
+            switch (direction) {
+                case 'right':
+                    nextX = newX + 1;
+                    break;
+                case 'left':
+                    nextX = newX - 1;
+                    break;
+                case 'down':
+                    nextY = newY + 1;
+                    break;
+                case 'up':
+                    nextY = newY - 1;
+                    break;
+            }
+
+            if (nextX < 0 || nextX >= GRID_SIZE || nextY < 0 || nextY >= GRID_SIZE) {
+                break;
+            }
+
+            if (boxes.some(b => b.gridX === nextX && b.gridY === nextY)) {
+                break;
+            }
+
+            newX = nextX;
+            newY = nextY;
+            moved = true;
+        }
+
+        box.gridX = newX;
+        box.gridY = newY;
+    });
+
+    // Second pass: merge boxes
+    const mergedBoxes = new Set();
+    
+    // For each row/column based on direction
+    for (let i = 0; i < GRID_SIZE; i++) {
+        let boxesInLine = [];
+        
+        // Collect boxes in current line
+        for (let j = 0; j < GRID_SIZE; j++) {
+            let x = direction === 'left' || direction === 'right' ? j : i;
+            let y = direction === 'left' || direction === 'right' ? i : j;
+            
+            const box = boxes.find(b => 
+                b.gridX === x && 
+                b.gridY === y && 
+                !mergedBoxes.has(b)
+            );
+            
+            if (box) {
+                boxesInLine.push(box);
+            }
+        }
+        
+        // Process merges in the line
+        if (direction === 'right' || direction === 'down') {
+            boxesInLine.reverse();
+        }
+        
+        for (let j = 0; j < boxesInLine.length - 1; j++) {
+            if (boxesInLine[j].value === boxesInLine[j + 1].value) {
+                boxesInLine[j].value *= 2;
+                mergedBoxes.add(boxesInLine[j + 1]);
+                boxesInLine.splice(j + 1, 1);
+                moved = true;
+            }
+        }
+    }
+    
+    // Remove merged boxes
+    boxes = boxes.filter(box => !mergedBoxes.has(box));
+
+    // Third pass: final positioning
+    sortedBoxes.forEach(box => {
+        if (mergedBoxes.has(box)) return;
+
+        let newX = box.gridX;
+        let newY = box.gridY;
+
+        while (true) {
+            let nextX = newX;
+            let nextY = newY;
+
+            switch (direction) {
+                case 'right':
+                    nextX = newX + 1;
+                    break;
+                case 'left':
+                    nextX = newX - 1;
+                    break;
+                case 'down':
+                    nextY = newY + 1;
+                    break;
+                case 'up':
+                    nextY = newY - 1;
+                    break;
+            }
+
+            if (nextX < 0 || nextX >= GRID_SIZE || nextY < 0 || nextY >= GRID_SIZE) {
+                break;
+            }
+
+            if (boxes.some(b => b.gridX === nextX && b.gridY === nextY)) {
+                break;
+            }
+
+            newX = nextX;
+            newY = nextY;
+            moved = true;
+        }
+
+        box.gridX = newX;
+        box.gridY = newY;
+    });
+
+    if (moved) {
+        stepCount++;
+        updateStatsDisplay();
+        addNewBox();
+        render();
+    }
+
+    if (isGameOver()) {
+        drawGameOver();
+        isAutoPlaying = false;
+        document.getElementById('autoPlayBtn').disabled = false;
+    }
+}
+
+// Handle keyboard events
+window.addEventListener('keydown', (e) => {
+    switch (e.key) {
+        case 'ArrowUp': moveBoxes('up'); break;
+        case 'ArrowDown': moveBoxes('down'); break;
+        case 'ArrowLeft': moveBoxes('left'); break;
+        case 'ArrowRight': moveBoxes('right'); break;
+    }
+});
+
+// Render game
+function render() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawGrid();
+    drawBox();
+    
+    if (isCalculating) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(238, 228, 218, 0.85)';
+        ctx.font = 'bold 24px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Calculating...', canvas.width / 2, canvas.height / 2);
+        ctx.restore();
+    }
+    
+    if (currentArrow) {
+        const elapsed = Date.now() - currentArrow.timestamp;
+        if (elapsed < ARROW_DISPLAY_TIME) {
+            drawArrow(currentArrow.direction);
+            requestAnimationFrame(render);
+        } else {
+            currentArrow = null;
+        }
+    }
+    
+    if (isGameOver()) {
+        drawGameOver();
+    }
+    
+    if (boxes.some(box => box.isNew)) {
+        requestAnimationFrame(render);
+    }
+}
+
+// Touch handling
+let touchStartX = null;
+let touchStartY = null;
+
+canvas.addEventListener('touchstart', handleTouchStart);
+canvas.addEventListener('touchend', handleTouchEnd);
+
+function handleTouchStart(event) {
+    event.preventDefault();
+    const touch = event.touches[0];
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+}
+
+function handleTouchEnd(event) {
+    if (!touchStartX || !touchStartY) return;
+
+    const touch = event.changedTouches[0];
+    const deltaX = touch.clientX - touchStartX;
+    const deltaY = touch.clientY - touchStartY;
+
+    if (Math.abs(deltaX) > Math.abs(deltaY)) {
+        if (deltaX > 50) moveBoxes('right');
+        else if (deltaX < -50) moveBoxes('left');
+    } else {
+        if (deltaY > 50) moveBoxes('down');
+        else if (deltaY < -50) moveBoxes('up');
+    }
+
+    touchStartX = null;
+    touchStartY = null;
+}
+
+// Initial render
+render();
+
+// Add game over drawing function
+function drawGameOver() {
+    // Semi-transparent overlay
+    ctx.fillStyle = GAME_OVER_OVERLAY_COLOR;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Game Over text
+    ctx.fillStyle = GAME_OVER_TEXT_COLOR;
+    ctx.font = 'bold 60px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    // Add text shadow for better visibility
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+    
+    // Draw the text
+    ctx.fillText(
+        'GAME OVER',
+        canvas.width / 2,
+        canvas.height / 2
+    );
+    
+    // Reset shadow
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+}
+
+// Add auto-play functions
+function startAutoPlay() {
+    if (isAutoPlaying || isGameOver()) return;
+    
+    stepCount = 0;
+    currentMovePositionsEvaluated = 0;
+    totalPositionsEvaluated = 0;  // Reset total at start of new game
+    updateStatsDisplay();
+    
+    const button = document.getElementById('autoPlayBtn');
+    button.disabled = true;
+    isAutoPlaying = true;
+    makeAutoMove();
+}
+
+// Update algorithm strategies to use the new function
+const algorithms = {
+    random: {
+        name: 'Random',
+        getNextMove: () => {
+            const directions = ['up', 'right', 'down', 'left'];
+            const possibleMoves = directions.filter(direction => 
+                canMoveInDirection(direction)
+            );
+            
+            if (possibleMoves.length > 0) {
+                return possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+            }
+            return null;
+        }
+    },
+    
+    priority: {
+        name: 'Priority Direction',
+        getNextMove: () => {
+            const directions = ['right', 'down', 'left', 'up']; // Priority order
+            for (let direction of directions) {
+                if (canMoveInDirection(direction)) {
+                    return direction;
+                }
+            }
+            return null;
+        }
+    },
+    
+    snake: {
+        name: 'Snake Pattern',
+        getNextMove: () => {
+            const pattern = ['right', 'down', 'left', 'down'];
+            const currentStep = stepCount % pattern.length;
+            const preferredDirection = pattern[currentStep];
+            
+            // Try preferred direction first
+            if (canMoveInDirection(preferredDirection)) {
+                return preferredDirection;
+            }
+            
+            // If preferred direction is not possible, try others
+            const directions = ['up', 'right', 'down', 'left'];
+            for (let direction of directions) {
+                if (direction !== preferredDirection && canMoveInDirection(direction)) {
+                    return direction;
+                }
+            }
+            return null;
+        }
+    }
+};
+
+// Update makeAutoMove function
+function makeAutoMove() {
+    if (!isAutoPlaying || isGameOver()) {
+        isAutoPlaying = false;
+        document.getElementById('autoPlayBtn').disabled = false;
+        currentArrow = null;
+        return;
+    }
+
+    const algorithmSelect = document.getElementById('algorithmSelect');
+    const selectedAlgorithm = algorithms[algorithmSelect.value];
+    const nextMove = selectedAlgorithm.getNextMove();
+
+    if (nextMove) {
+        currentArrow = {
+            direction: nextMove,
+            timestamp: Date.now()
+        };
+        
+        moveBoxes(nextMove);
+        requestAnimationFrame(render);
+        
+        setTimeout(makeAutoMove, AUTOPLAY_DELAY);
+    } else {
+        isAutoPlaying = false;
+        document.getElementById('autoPlayBtn').disabled = false;
+        currentArrow = null;
+    }
+}
+
+// Add event listener for the button
+document.addEventListener('DOMContentLoaded', () => {
+    const autoPlayBtn = document.getElementById('autoPlayBtn');
+    const speedSlider = document.getElementById('speedSlider');
+    const speedLabel = document.getElementById('speedLabel');
+
+    autoPlayBtn.addEventListener('click', startAutoPlay);
+
+    speedSlider.addEventListener('input', (e) => {
+        AUTOPLAY_DELAY = parseInt(e.target.value);
+        const seconds = (AUTOPLAY_DELAY / 1000).toFixed(1);
+        speedLabel.textContent = `Delay: ${seconds}s`;
+    });
+
+    const algorithmSelect = document.getElementById('algorithmSelect');
+    algorithmSelect.addEventListener('change', () => {
+        updateStatsDisplay();
+    });
+});
+
+// Add arrow drawing function
+function drawArrow(direction) {
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const arrowSize = CELL_SIZE; // Size of the arrow
+
+    ctx.save();
+    ctx.fillStyle = ARROW_COLOR;
+    ctx.strokeStyle = ARROW_COLOR;
+    ctx.lineWidth = 8;
+
+    // Move to center and rotate based on direction
+    ctx.translate(centerX, centerY);
+    switch (direction) {
+        case 'up':
+            ctx.rotate(-Math.PI / 2);
+            break;
+        case 'down':
+            ctx.rotate(Math.PI / 2);
+            break;
+        case 'left':
+            ctx.rotate(Math.PI);
+            break;
+        case 'right':
+            // Default orientation
+            break;
+    }
+
+    // Draw arrow
+    ctx.beginPath();
+    // Arrow shaft
+    ctx.moveTo(-arrowSize/2, 0);
+    ctx.lineTo(arrowSize/2 - arrowSize/4, 0);
+    // Arrow head
+    ctx.lineTo(arrowSize/2 - arrowSize/4, -arrowSize/4);
+    ctx.lineTo(arrowSize/2, 0);
+    ctx.lineTo(arrowSize/2 - arrowSize/4, arrowSize/4);
+    ctx.lineTo(arrowSize/2 - arrowSize/4, 0);
+    
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+}
+
+// Update step counter display function
+function updateStatsDisplay() {
+    document.getElementById('stepCounter').textContent = stepCount;
+    
+    const probeStats = document.getElementById('probeStats');
+    const algorithmSelect = document.getElementById('algorithmSelect');
+    
+    if (algorithmSelect.value === 'probeAll') {
+        probeStats.style.display = 'block';
+        document.getElementById('probeCounter').textContent = 
+            `${currentMovePositionsEvaluated.toLocaleString()} (Total: ${totalPositionsEvaluated.toLocaleString()})`;
+    } else {
+        probeStats.style.display = 'none';
+    }
+}
+
+// Add gradient weight pattern that encourages building high values in a corner
+const GRADIENT_WEIGHTS = [
+    [4.0, 3.0, 2.0, 1.0],
+    [3.0, 2.0, 1.0, 0.7],
+    [2.0, 1.0, 0.7, 0.4],
+    [1.0, 0.7, 0.4, 0.0]
+];
+
+// Update probe weights
+const PROBE_WEIGHTS = {
+    emptySpaces: 2.5,     // Empty spaces are very important
+    monotonicity: 2.0,    // Sequences should be ordered
+    smoothness: 1.0,      // Adjacent tiles should be similar
+    gradient: 1.5,        // Follow gradient pattern
+    mergesPossible: 1.2   // Potential merges are good
+};
+
+// Enhanced evaluation function
+function evaluatePosition(boxesState) {
+    currentMovePositionsEvaluated++;
+    totalPositionsEvaluated++;
+    let score = 0;
+
+    // Count empty spaces
+    const occupied = new Set();
+    boxesState.forEach(box => {
+        occupied.add(`${box.gridX},${box.gridY}`);
+    });
+    const emptySpaces = (GRID_SIZE * GRID_SIZE) - occupied.size;
+    score += PROBE_WEIGHTS.emptySpaces * emptySpaces;
+
+    // Calculate monotonicity (sequences should be ordered)
+    let monotonicityScore = 0;
+    // Check rows
+    for (let y = 0; y < GRID_SIZE; y++) {
+        let rowValues = Array(GRID_SIZE).fill(0);
+        boxesState.forEach(box => {
+            if (box.gridY === y) {
+                rowValues[box.gridX] = Math.log2(box.value);
+            }
+        });
+        
+        // Check left to right and right to left
+        let leftToRight = 0;
+        let rightToLeft = 0;
+        for (let i = 1; i < GRID_SIZE; i++) {
+            if (rowValues[i] !== 0 && rowValues[i-1] !== 0) {
+                leftToRight += rowValues[i] >= rowValues[i-1] ? 1 : -1;
+                rightToLeft += rowValues[i] <= rowValues[i-1] ? 1 : -1;
+            }
+        }
+        monotonicityScore += Math.max(leftToRight, rightToLeft);
+    }
+    
+    // Check columns
+    for (let x = 0; x < GRID_SIZE; x++) {
+        let colValues = Array(GRID_SIZE).fill(0);
+        boxesState.forEach(box => {
+            if (box.gridX === x) {
+                colValues[box.gridY] = Math.log2(box.value);
+            }
+        });
+        
+        // Check top to bottom and bottom to top
+        let topToBottom = 0;
+        let bottomToTop = 0;
+        for (let i = 1; i < GRID_SIZE; i++) {
+            if (colValues[i] !== 0 && colValues[i-1] !== 0) {
+                topToBottom += colValues[i] >= colValues[i-1] ? 1 : -1;
+                bottomToTop += colValues[i] <= colValues[i-1] ? 1 : -1;
+            }
+        }
+        monotonicityScore += Math.max(topToBottom, bottomToTop);
+    }
+    score += PROBE_WEIGHTS.monotonicity * monotonicityScore;
+
+    // Calculate smoothness (adjacent tiles should be similar)
+    let smoothness = 0;
+    boxesState.forEach(box => {
+        const neighbors = [
+            [box.gridX + 1, box.gridY],
+            [box.gridX - 1, box.gridY],
+            [box.gridX, box.gridY + 1],
+            [box.gridX, box.gridY - 1]
+        ];
+        
+        neighbors.forEach(([x, y]) => {
+            if (x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE) {
+                const neighbor = boxesState.find(b => b.gridX === x && b.gridY === y);
+                if (neighbor) {
+                    smoothness -= Math.abs(Math.log2(box.value) - Math.log2(neighbor.value));
+                }
+            }
+        });
+    });
+    score += PROBE_WEIGHTS.smoothness * smoothness;
+
+    // Apply gradient weights
+    let gradientScore = 0;
+    boxesState.forEach(box => {
+        gradientScore += Math.log2(box.value) * GRADIENT_WEIGHTS[box.gridY][box.gridX];
+    });
+    score += PROBE_WEIGHTS.gradient * gradientScore;
+
+    // Count possible merges
+    let mergesPossible = 0;
+    boxesState.forEach(box => {
+        const neighbors = [
+            [box.gridX + 1, box.gridY],
+            [box.gridX - 1, box.gridY],
+            [box.gridX, box.gridY + 1],
+            [box.gridX, box.gridY - 1]
+        ];
+        
+        neighbors.forEach(([x, y]) => {
+            if (x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE) {
+                const neighbor = boxesState.find(b => b.gridX === x && b.gridY === y);
+                if (neighbor && neighbor.value === box.value) {
+                    mergesPossible++;
+                }
+            }
+        });
+    });
+    score += PROBE_WEIGHTS.mergesPossible * (mergesPossible / 2);
+
+    return score;
+}
+
+function simulateMove(boxesState, direction) {
+    const newState = JSON.parse(JSON.stringify(boxesState));
+    let moved = false;
+    
+    // Simulate move using existing game logic
+    // ... (simplified version of moveBoxes logic) ...
+    // Return null if move is invalid
+    if (!canMoveInDirection(direction, newState)) {
+        return null;
+    }
+    
+    // Simulate the move
+    const sortedBoxes = sortBoxesForMovement(direction, newState);
+    const mergedBoxes = new Set();
+    
+    // Move and merge logic (simplified from moveBoxes)
+    // ... implementation ...
+    
+    // Add a new box in random empty position
+    const emptyPositions = [];
+    for (let y = 0; y < GRID_SIZE; y++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+            if (!newState.some(box => box.gridX === x && box.gridY === y)) {
+                emptyPositions.push({x, y});
+            }
+        }
+    }
+    
+    if (emptyPositions.length > 0) {
+        const randomPos = emptyPositions[Math.floor(Math.random() * emptyPositions.length)];
+        newState.push({
+            gridX: randomPos.x,
+            gridY: randomPos.y,
+            value: Math.random() < 0.9 ? 2 : 4
+        });
+    }
+    
+    return newState;
+}
+
+// Update probeNextMoves function with alpha-beta pruning
+function probeNextMoves(boxesState, depth, alpha = MIN_SCORE, beta = MAX_SCORE, isMaximizing = true) {
+    if (depth === 0) {
+        return evaluatePosition(boxesState);
+    }
+
+    const directions = ['up', 'right', 'down', 'left'];
+    
+    if (isMaximizing) {
+        let maxScore = MIN_SCORE;
+        for (const direction of directions) {
+            const newState = simulateMove(boxesState, direction);
+            if (newState) {
+                const score = probeNextMoves(newState, depth - 1, alpha, beta, false);
+                maxScore = Math.max(maxScore, score);
+                alpha = Math.max(alpha, score);
+                if (beta <= alpha) {
+                    break; // Beta cut-off
+                }
+            }
+        }
+        return maxScore === MIN_SCORE ? evaluatePosition(boxesState) : maxScore;
+    } else {
+        let minScore = MAX_SCORE;
+        // Simulate the computer's turn (adding a new tile)
+        const emptyPositions = [];
+        for (let y = 0; y < GRID_SIZE; y++) {
+            for (let x = 0; x < GRID_SIZE; x++) {
+                if (!boxesState.some(box => box.gridX === x && box.gridY === y)) {
+                    emptyPositions.push({x, y});
+                }
+            }
+        }
+        
+        if (emptyPositions.length === 0) {
+            return evaluatePosition(boxesState);
+        }
+
+        // Sample a few random positions instead of trying all
+        const positionsToTry = Math.min(3, emptyPositions.length);
+        for (let i = 0; i < positionsToTry; i++) {
+            const randomIndex = Math.floor(Math.random() * emptyPositions.length);
+            const pos = emptyPositions[randomIndex];
+            emptyPositions.splice(randomIndex, 1);
+
+            // Try both 2 and 4 as new tiles
+            [2, 4].forEach(value => {
+                const newState = JSON.parse(JSON.stringify(boxesState));
+                newState.push({
+                    gridX: pos.x,
+                    gridY: pos.y,
+                    value: value
+                });
+                
+                const score = probeNextMoves(newState, depth - 1, alpha, beta, true);
+                minScore = Math.min(minScore, score);
+                beta = Math.min(beta, score);
+                if (beta <= alpha) {
+                    return minScore; // Alpha cut-off
+                }
+            });
+        }
+        return minScore === MAX_SCORE ? evaluatePosition(boxesState) : minScore;
+    }
+}
+
+// Update probeAll algorithm
+algorithms.probeAll = {
+    name: 'Smart Probe',
+    getNextMove: () => {
+        isCalculating = true;
+        currentMovePositionsEvaluated = 0;
+        render();
+
+        const directions = ['up', 'right', 'down', 'left'];
+        let bestDirection = null;
+        let bestScore = MIN_SCORE;
+        let alpha = MIN_SCORE;
+        let beta = MAX_SCORE;
+
+        for (const direction of directions) {
+            if (!canMoveInDirection(direction)) continue;
+            
+            const newState = simulateMove(boxes, direction);
+            if (newState) {
+                const score = probeNextMoves(newState, PROBE_DEPTH - 1, alpha, beta, false);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestDirection = direction;
+                }
+                alpha = Math.max(alpha, score);
+            }
+        }
+
+        isCalculating = false;
+        updateStatsDisplay();
+        return bestDirection;
+    }
+};
+
+// Update HTML to include new algorithm
+// Add to the select options in index.html:
+// <option value="probeAll">Probe All</option> 
+    </script>
 </body>
 </html> 
