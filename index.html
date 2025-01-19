@@ -7,6 +7,7 @@
     <style>
         body {
             margin: 0;
+            padding: 0;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -98,6 +99,19 @@
         .stats-label {
             font-weight: bold;
             margin-right: 5px;
+        }
+        canvas {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+        #game-container {
+            width: 100%;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 10px;
+            box-sizing: border-box;
         }
     </style>
 </head>
@@ -1136,6 +1150,30 @@ algorithms.probeAll = {
 // Update HTML to include new algorithm
 // Add to the select options in index.html:
 // <option value="probeAll">Probe All</option> 
+
+function updateDisplay() {
+    const canvas = document.getElementById('hangman-canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Make canvas responsive
+    const containerWidth = Math.min(600, window.innerWidth - 20); // 20px for padding
+    canvas.style.width = containerWidth + 'px';
+    canvas.width = containerWidth;
+    canvas.height = containerWidth * 0.7; // Maintain aspect ratio
+
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Scale drawing operations based on canvas size
+    const scale = containerWidth / 600; // 600 is our base width
+    ctx.scale(scale, scale);
+    
+    // Rest of your drawing code...
+    // ... existing code ...
+}
+
+// Add resize listener to handle screen rotation and size changes
+window.addEventListener('resize', updateDisplay);
     </script>
 </body>
 </html> 
